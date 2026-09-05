@@ -163,7 +163,9 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
 	$(CONTAINER_TOOL) build -t $(IMG) .
+	rm -f manager
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -177,6 +179,11 @@ docker-push: ## Push docker image with the manager.
 # To properly provided solutions that supports more than one platform you should use this option.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
+# NOTE: broken since the Dockerfile switched to copying a pre-built "manager"
+# binary instead of compiling it in a builder stage - the --platform injection
+# below has nothing to cross-compile against anymore. Needs reworking (e.g.
+# per-arch binaries copied in via TARGETARCH) before cross-platform builds
+# work again. CI (goreleaser) only builds linux/amd64 and is unaffected.
 docker-buildx: test ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
