@@ -164,8 +164,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
-	$(CONTAINER_TOOL) build -t $(IMG) .
-	rm -f manager
+	set +e; $(CONTAINER_TOOL) build -t $(IMG) . ; status=$$?; rm -f manager; exit $$status
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -179,19 +178,20 @@ docker-push: ## Push docker image with the manager.
 # To properly provided solutions that supports more than one platform you should use this option.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
-# NOTE: broken since the Dockerfile switched to copying a pre-built "manager"
-# binary instead of compiling it in a builder stage - the --platform injection
-# below has nothing to cross-compile against anymore. Needs reworking (e.g.
-# per-arch binaries copied in via TARGETARCH) before cross-platform builds
-# work again. CI (goreleaser) only builds linux/amd64 and is unaffected.
 docker-buildx: test ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	# cross-compile a "manager" binary for each target platform, since the Dockerfile no longer
+	# builds from source and needs one pre-built binary per platform to copy in below
+	- for platform in $$(echo $(PLATFORMS) | tr ',' ' '); do \
+		CGO_ENABLED=0 GOOS=$${platform%%/*} GOARCH=$${platform##*/} go build -a -o manager-$${platform%%/*}-$${platform##*/} main.go; \
+	done
+	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, rewrite the
+	# COPY line to pull in the binary matching the platform being built, and preserve the original Dockerfile
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/' -e 's/^COPY manager \./COPY manager-\$$\{TARGETOS\}-\$$\{TARGETARCH\} ./' Dockerfile > Dockerfile.cross
 	- $(CONTAINER_TOOL) buildx create --name {{ .ProjectName }}-builder
 	$(CONTAINER_TOOL) buildx use {{ .ProjectName }}-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm {{ .ProjectName }}-builder
-	rm Dockerfile.cross
+	rm -f Dockerfile.cross manager-*
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.

@@ -38,8 +38,14 @@ const dockerfileTemplate = `# Use distroless as minimal base image to package th
 # since release tooling such as goreleaser's docker pipe builds this image
 # from a context that only contains the release binary, not the full repo
 # source.
+#
+# TARGETOS/TARGETARCH are unused by default (goreleaser only ever builds one
+# platform per image) but are declared here so "make docker-buildx" can
+# rewrite the COPY line below to pull in a per-platform binary.
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
+ARG TARGETOS
+ARG TARGETARCH
 COPY manager .
 USER 65532:65532
 
