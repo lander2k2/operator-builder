@@ -185,10 +185,16 @@ docker-buildx: test ## Build and push docker image for the manager for cross-pla
 	# that chaining, so further explanation stays here rather than inline below
 	#
 	# cross-compile one "manager" binary per platform, then copy the Dockerfile and rewrite its
-	# COPY line so BuildKit pulls in the binary matching whichever platform it is currently building
+	# COPY line so BuildKit pulls in the binary matching whichever platform it is currently building;
+	# variant-qualified platforms (e.g. linux/arm/v7) are rejected since the binary name and the
+	# Dockerfile's COPY selection below are keyed on os/arch only, not the variant
 	trap 'rm -f Dockerfile.cross manager-*' EXIT; \
 	for platform in $$(echo $(PLATFORMS) | tr ',' ' '); do \
 		os=$${platform%%/*}; rest=$${platform#*/}; arch=$${rest%%/*}; \
+		if [ "$$rest" != "$$arch" ]; then \
+			echo "docker-buildx: platform \"$$platform\" has a variant, which is not supported; use a plain os/arch platform instead" >&2; \
+			exit 1; \
+		fi; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -a -o manager-$$os-$$arch main.go; \
 	done; \
 	sed -e 's/^COPY manager \./COPY manager-\$$\{TARGETOS\}-\$$\{TARGETARCH\} ./' Dockerfile > Dockerfile.cross; \
